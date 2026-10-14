@@ -1,0 +1,24 @@
+[Unit]
+Description=Lakehouse Internet connectivity reporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=connectivity-reporter
+Group=connectivity-reporter
+WorkingDirectory=/var/lib/connectivity-reporter
+ExecStart=/opt/connectivity-reporter/.venv/bin/python -m connectivity_reporter --config /etc/connectivity-reporter/config.local.json
+Restart=on-failure
+RestartSec=10
+StateDirectory=connectivity-reporter
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/connectivity-reporter
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

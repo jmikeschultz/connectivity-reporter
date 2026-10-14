@@ -1,0 +1,19 @@
+{
+  "internet_probe_ips": [
+    "1.1.1.1",
+    "8.8.8.8"
+  ],
+  "internet_probe_tcp_port": 53,
+  "internet_check_seconds": 60,
+  "internet_timeout_seconds": 3,
+  "failed_checks_to_off": 3,
+  "successful_checks_to_on": 2,
+  "checkpoint_seconds": 900,
+  "database_path": "state/connectivity.sqlite3",
+  "ha_events_url": "https://home-assistant.example.com/api/daily_activity/events",
+  "ha_source_id": "lakehouse_internet",
+  "ha_ingestion_token": "REPLACE_ME",
+  "report_seconds": 60,
+  "retry_max_seconds": 300,
+  "ha_verify_certificate": true
+}
