@@ -28,7 +28,7 @@ fi
 for executable in python3 systemctl useradd getent install runuser; do
     command -v "$executable" >/dev/null || { echo "Missing requirement: $executable" >&2; exit 1; }
 done
-python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11 or newer is required")'
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else "Python 3.9 or newer is required")'
 if [[ ! -d /run/systemd/system ]]; then
     echo "This installer requires a Linux host running systemd." >&2
     exit 1

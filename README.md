@@ -41,7 +41,7 @@ See the [Daily Activity producer contract](https://github.com/jmikeschultz/ha_da
 
 ## Development
 
-Python 3.11 or newer is required. There are no runtime dependencies beyond the standard library.
+Python 3.9 or newer is required. There are no runtime dependencies beyond the standard library.
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
@@ -62,7 +62,7 @@ git pull
 sudo ./install.sh
 ```
 
-The installer validates configuration, creates the service account and private state directory, installs Python into an isolated environment without downloading dependencies, protects the configuration, installs the systemd unit, enables it at boot, and starts it. Python 3.11+ and systemd are required. It only controls the reporter service.
+The installer validates configuration, creates the service account and private state directory, installs Python into an isolated environment without downloading dependencies, protects the configuration, installs the systemd unit, enables it at boot, and starts it. Python 3.9+ and systemd are required. It only controls the reporter service.
 
 For subsequent code updates, use the same two commands. The installer preserves the installed configuration and database. To replace installed configuration with your edited local file explicitly:
 
