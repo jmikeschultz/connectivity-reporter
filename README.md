@@ -49,28 +49,28 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 
 ## Install as a systemd service
 
-Run these commands on the lakehouse Linux machine from this repository. They install files and enable the service; they have not been run automatically here.
+On lakehouse, edit your local `config.json` with the HA endpoint, registered source ID, and ingestion token. Set:
 
-```bash
-sudo useradd --system --home-dir /var/lib/connectivity-reporter --shell /usr/sbin/nologin connectivity-reporter
-sudo install -d /opt/connectivity-reporter /etc/connectivity-reporter
-sudo cp -r src pyproject.toml README.md /opt/connectivity-reporter/
-sudo python3 -m venv /opt/connectivity-reporter/.venv
-sudo /opt/connectivity-reporter/.venv/bin/pip install /opt/connectivity-reporter
-sudo install -m 640 -o root -g connectivity-reporter config.example.json /etc/connectivity-reporter/config.local.json
-sudoedit /etc/connectivity-reporter/config.local.json
+```json
+"database_path": "/var/lib/connectivity-reporter/connectivity.sqlite3"
 ```
 
-Set the HA endpoint, registered source ID, and source-specific ingestion token. Set `database_path` to `/var/lib/connectivity-reporter/connectivity.sqlite3` so it is writable inside the service sandbox. Keep probe addresses public. Then validate and start:
+For the private Tailscale connection to HA's IP, set `ha_verify_certificate` to `false` if its certificate does not match that IP. Then, from the cloned repository:
 
 ```bash
-sudo -u connectivity-reporter /opt/connectivity-reporter/.venv/bin/python -m connectivity_reporter --config /etc/connectivity-reporter/config.local.json --check-config
-sudo install -m 644 deployment/connectivity-reporter.service /etc/systemd/system/connectivity-reporter.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now connectivity-reporter
-systemctl status connectivity-reporter
-journalctl -u connectivity-reporter -f
+git pull
+sudo ./install.sh
 ```
+
+The installer validates configuration, creates the service account and private state directory, installs Python into an isolated environment without downloading dependencies, protects the configuration, installs the systemd unit, enables it at boot, and starts it. Python 3.11+ and systemd are required. It only controls the reporter service.
+
+For subsequent code updates, use the same two commands. The installer preserves the installed configuration and database. To replace installed configuration with your edited local file explicitly:
+
+```bash
+sudo ./install.sh --config config.json
+```
+
+View logs with `sudo journalctl -u connectivity-reporter -f`. The installed configuration is `/etc/connectivity-reporter/config.local.json`.
 
 Use `sudo systemctl restart connectivity-reporter` after editing configuration and `sudo systemctl stop connectivity-reporter` to stop it. Configure the reported source in Daily Activity before starting. Token issuance happens in the integration's configuration UI; a general HA access token is not accepted by this endpoint.
 
