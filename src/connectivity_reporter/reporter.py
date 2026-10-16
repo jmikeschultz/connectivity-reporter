@@ -185,19 +185,16 @@ def check_target(ip, port, timeout):
     try:
         with socket.create_connection((ip, port), timeout=timeout):
             return True
-    except (TimeoutError, ConnectionError):
+    except OSError:
+        # Any unsuccessful socket connection is evidence of failed reachability,
+        # regardless of the platform-specific error (including unknown errno).
         return False
-    except OSError as error:
-        import errno
-        if error.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ETIMEDOUT):
-            return False
-        return None
 
 
 def probe(config, pool):
     futures = [pool.submit(check_target, ip, config['internet_probe_tcp_port'], config['internet_timeout_seconds']) for ip in config['internet_probe_ips']]
     results = [future.result() for future in futures]
-    return True if True in results else (None if None in results else False)
+    return any(results)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

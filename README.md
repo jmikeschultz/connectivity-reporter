@@ -101,7 +101,19 @@ The flat configuration is in `config.example.json`. Copy it to `config.local.jso
 
 Fixed implementation defaults: accept either successful Internet target, use a 15-second HTTP timeout, cap batches at 100 events and 65,536 encoded bytes, retry from 5 seconds with jitter, and log at INFO without secrets. Treat observation gaps longer than the greater of 60 seconds or three check intervals as lost continuity.
 
-Failed checks describe reachability of the configured targets; probe execution errors or periods without observations require UNKNOWN or omitted coverage rather than fabricated outages. Confirmation thresholds delay state changes; transitions use the confirmation timestamp.
+The reported states mean:
+
+- **ON:** At least one configured Internet target accepted a TCP connection for the configured number of consecutive successful rounds.
+- **OFF:** Every configured target failed to connect for the configured number of consecutive failed rounds. Every socket connection error counts as failure, including refusal, timeout, unreachable/down networks, permission errors, and errors without a recognized error number. A failed target does not override another target's successful connection.
+- **UNKNOWN:** Connectivity has not yet been confirmed, such as at startup or after a lost observation gap. A failed connection attempt never produces UNKNOWN. While a new state awaits confirmation, the previous state remains in effect; an opposite result resets the consecutive-round count. Unexpected programming errors propagate rather than becoming a connectivity observation.
+
+Reporter downtime is omitted coverage. Confirmation thresholds delay state changes; transitions use the confirmation timestamp.
+
+### Known reliability limitations
+
+Outage timestamps remain confirmation times, rather than the first failed or recovered probe. Short outages can be filtered entirely, and both outage start and recovery are delayed by polling and their respective thresholds. This patch does not reconstruct previously reported UNKNOWN intervals.
+
+An unexpected delivery-worker exception currently stops the reporter through its stop flag without propagating a failing exit status. With the supplied systemd `Restart=on-failure` policy, that path may leave reporting stopped until manually restarted. Also, the SQLite queue has no local retention or size limit; prolonged delivery failure or permanently rejected events can grow disk usage. These are follow-up concerns; this patch preserves delivery and persistence behavior.
 
 Idempotency is mandatory behavior, not a setting: generate a unique event ID and durably persist the immutable closed interval before sending it. Every retry uses that same ID and content, including after a restart. Remove pending delivery only after the individual event is acknowledged as `accepted` or `duplicate`; inspect partial responses and retain rejected events with their error for diagnosis. Open intervals must be checkpointed into distinct, exactly adjacent closed intervals rather than modifying an already submitted event. Reporter downtime must not be extrapolated as known connectivity.
 

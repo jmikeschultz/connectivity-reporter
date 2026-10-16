@@ -1,9 +1,47 @@
 import json
+import concurrent.futures
+import errno
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
-from connectivity_reporter.reporter import DEFAULTS, Ledger, deliver, load_config
+from unittest.mock import MagicMock, patch
+from connectivity_reporter.reporter import DEFAULTS, Ledger, check_target, deliver, load_config, probe, stamp
+
+
+class ProbeTests(unittest.TestCase):
+    def test_successful_connection_is_closed(self):
+        with patch('socket.create_connection') as connect:
+            self.assertIs(check_target('1.1.1.1', 53, 3), True)
+            connect.assert_called_once_with(('1.1.1.1', 53), timeout=3)
+            connect.return_value.__exit__.assert_called_once()
+
+    def test_every_socket_error_is_a_failed_probe(self):
+        errors = [ConnectionRefusedError(errno.ECONNREFUSED, 'refused'),
+                  TimeoutError('timed out'),
+                  OSError(errno.ENETUNREACH, 'network unreachable'),
+                  OSError(errno.EHOSTUNREACH, 'host unreachable'),
+                  OSError(errno.ENETDOWN, 'network down'),
+                  OSError(errno.EACCES, 'permission denied'),
+                  OSError(123456, 'unrecognized socket error'), OSError()]
+        for error in errors:
+            with self.subTest(error=repr(error)), patch('socket.create_connection', side_effect=error):
+                self.assertIs(check_target('1.1.1.1', 53, 3), False)
+
+    def test_any_reached_target_makes_round_successful(self):
+        for outcomes in [(True, True), (True, False), (False, True), (False, False)]:
+            def connect(address, timeout):
+                if outcomes[DEFAULTS['internet_probe_ips'].index(address[0])]:
+                    return MagicMock()
+                raise OSError(errno.ENETDOWN, 'network down')
+            with self.subTest(outcomes=outcomes), patch('socket.create_connection', side_effect=connect):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                    self.assertIs(probe(DEFAULTS, pool), any(outcomes))
+
+    def test_unexpected_programming_error_is_not_a_connectivity_result(self):
+        with patch('socket.create_connection', side_effect=RuntimeError('unexpected')):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                with self.assertRaises(RuntimeError):
+                    probe(DEFAULTS, pool)
 
 
 class ReporterTests(unittest.TestCase):
@@ -89,6 +127,62 @@ class ReporterTests(unittest.TestCase):
         self.ledger.observe(False, 1120, config)
         self.ledger.observe(True, 1180, config)
         self.assertEqual(self.ledger.state, 'on')
+
+    def test_failed_connections_confirm_outage_and_consecutive_recovery(self):
+        config = self.config | dict(successful_checks_to_on=2, failed_checks_to_off=3,
+                                    checkpoint_seconds=900)
+        # Interrupted failure and recovery streaks must restart their counts.
+        rounds = [True, True, False, False, True, False, False, False,
+                  True, False, True, True]
+        expected = ['unknown', 'on', 'on', 'on', 'on', 'on', 'on', 'off',
+                    'off', 'off', 'off', 'on']
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            for i, (reachable, state) in enumerate(zip(rounds, expected)):
+                with patch('socket.create_connection') as connect:
+                    if not reachable:
+                        connect.side_effect = OSError(errno.ENETDOWN, 'network down')
+                    self.ledger.observe(probe(config, pool), 1000 + i * 60, config)
+                self.assertEqual(self.ledger.state, state)
+        events = self.ledger.batch()
+        self.assertEqual([e['state'] for e in events], ['unknown', 'on', 'off'])
+        self.assertEqual(events[1]['end'], stamp(1420))
+        self.assertEqual(events[2]['start'], stamp(1420))
+        self.assertEqual(events[2]['end'], stamp(1660))
+
+    def test_unknown_observation_requires_fresh_confirmation(self):
+        config = self.config | dict(successful_checks_to_on=2)
+        for result, now in [(True, 1000), (None, 1060), (True, 1120)]:
+            self.ledger.observe(result, now, config)
+            self.assertEqual(self.ledger.state, 'unknown')
+        self.ledger.observe(True, 1180, config)
+        self.assertEqual(self.ledger.state, 'on')
+
+    def test_offline_outage_survives_restart_and_delivery_retry(self):
+        config = self.config | dict(ha_events_url='https://ha.example.com/api/daily_activity/events',
+                                   ha_ingestion_token='a' * 43)
+        self.ledger.observe(True, 1000, config)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            with patch('socket.create_connection', side_effect=OSError(errno.ENETDOWN, 'network down')):
+                self.ledger.observe(probe(config, pool), 1060, config)
+        self.ledger.observe(False, 1120, config)
+        self.ledger.observe(True, 1180, config)
+        events = self.ledger.batch()
+        self.assertEqual([e['state'] for e in events], ['on', 'off'])
+        with patch('urllib.request.OpenerDirector.open', side_effect=OSError('offline')):
+            self.assertFalse(deliver(config, events, self.ledger))
+        self.ledger.db.close()
+        self.ledger = Ledger(self.path, 'lakehouse_internet')
+        self.ledger.recover()
+        self.assertEqual(self.ledger.batch(), events)
+        with patch('urllib.request.OpenerDirector.open') as opened:
+            response = opened.return_value.__enter__.return_value
+            response.status = 200
+            response.read.return_value = json.dumps({'results': [
+                dict(index=i, event_id=e['event_id'], status='accepted', http_status=201)
+                for i, e in enumerate(events)]}).encode()
+            self.assertTrue(deliver(config, self.ledger.batch(), self.ledger))
+            self.assertEqual(json.loads(opened.call_args.args[0].data), {'events': events})
+        self.assertEqual(self.ledger.batch(), [])
 
     def test_real_http_delivery_and_auth(self):
         from http.server import BaseHTTPRequestHandler, HTTPServer
